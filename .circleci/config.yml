@@ -326,6 +326,49 @@ jobs:
                 return 1
             fi
       
+  cloudfront-update:
+    docker:
+      - image: python:3.7-alpine3.11
+    steps:
+      - checkout
+      - install-dependencies
+      - run:
+          name: Update cloudfront distribution
+          command: |
+            export OldWorkflowID=$(aws cloudformation \
+              list-exports --query)
+            aws cloudformation deploy \
+              --template-file .circleci/files/cloudfront.yml \
+              --stack-name InitialStack \
+              --parameter-overrides WorkflowID="udapeople-${CIRCLE_WORKFLOW_ID:0:7}" \
+              --tags project=udapeople
+      - destroy-environment
+      - revert-migrations:
+          workflow_id: ${CIRCLE_WORKFLOW_ID}
+
+  cleanup:
+      docker:
+        - image: python:3.7-alpine3.11
+      steps:
+        - checkout
+        - install-dependencies
+        - run:
+           name: Remove old stacks and files
+           command: |
+             export OldWorkflowIDExport=$(aws cloudformation list-exports --query "Exports[?Name==\`WorkflowID\`].Value" --no-paginate --output text)
+             foo=$OldWorkflowIDExport
+             OldWorkflowID=${foo##*-}
+             export $OldWorkflowID
+             echo OldWorkflowID: "${OldWorkflowID}"
+             echo CIRCLE_WORKFLOW_ID "${CIRCLE_WORKFLOW_ID:0:7}"
+             if [[ "${CIRCLE_WORKFLOW_ID:0:7}" != "${OldWorkflowID}" ]]
+             then
+               echo "Start to cleanup old resources"
+               aws s3 rb "s3://udapeople-${OldWorkflowID}" --force
+               aws cloudformation delete-stack --stack-name "udapeople-backend-${OldWorkflowID}"
+               aws cloudformation delete-stack --stack-name "udapeople-frontend-${OldWorkflowID}"
+             fi
+
 
   
 
@@ -356,6 +399,10 @@ workflows:
           requires: [run-migration]
       - smoke-test:
           requires: [deploy-backend, deploy-frontend]
+      - cloudfront-update:
+          requires: [smoke-test]
+      - cleanup:
+          requires: [cloudfront-update]
       
         
       
